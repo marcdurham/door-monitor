@@ -14,6 +14,13 @@ const API_URL: &str = "http://192.168.1.226/rpc/Input.GetStatus?id=0";
 const CHECK_INTERVAL: Duration = Duration::from_secs(5);
 const WARNING_THRESHOLD: Duration = Duration::from_secs(15);
 
+fn play_beep() {
+    // Send terminal bell character to make an audible beep
+    print!("\x07");
+    use std::io::{self, Write};
+    io::stdout().flush().unwrap();
+}
+
 #[tokio::main]
 async fn main() {
     println!("Door Monitor Starting...");
@@ -33,6 +40,8 @@ async fn main() {
                     println!("[{}] The door is closed", timestamp);
                 } else {
                     println!("[{}] The door is open", timestamp);
+                    // Play beep when door is open
+                    play_beep();
                 }
                 
                 // Track when door was opened for timing warnings
