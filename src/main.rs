@@ -47,6 +47,9 @@ async fn send_sms(
     args: &Args,
     message: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+
+
+    
     if let (Some(username), Some(password), Some(from), Some(to)) = (
         &args.sms_api_username,
         &args.sms_api_password,
@@ -62,6 +65,8 @@ async fn send_sms(
             urlencoding::encode(message)
         );
 
+        println!("Voip URI: {}", uri);
+
         let response = client.get(&uri).send().await?;
         
         if response.status().is_success() {
@@ -69,6 +74,8 @@ async fn send_sms(
         } else {
             eprintln!("Failed to send SMS: HTTP {}", response.status());
         }
+    } else {
+        println!("SMS args not supplied");
     }
     
     Ok(())
@@ -89,7 +96,7 @@ async fn main() {
         match check_door_status(&client).await {
             Ok(door_status) => {
                 let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
-                let door_closed = door_status.state;
+                let door_closed = !door_status.state;  // TODO: Fix this, unnegate it
                 
                 // Always log the current door state
                 if door_closed {
@@ -121,6 +128,7 @@ async fn main() {
                             
                             // Send SMS once when threshold is reached
                             if !sms_sent {
+                                println!("[{}] Preparing to send SMS...", timestamp);
                                 let message = format!("ALERT: Door has been open for {:.1} seconds", time_open.as_secs_f64());
                                 if let Err(e) = send_sms(&client, &args, &message).await {
                                     eprintln!("[{}] Failed to send SMS: {}", timestamp, e);
