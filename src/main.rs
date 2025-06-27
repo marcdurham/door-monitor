@@ -41,6 +41,10 @@ struct Args {
     /// SMS To Phone Number
     #[arg(long)]
     sms_to_phone_number: Option<String>,
+
+    /// Enable SMS backoff (5,15,30,60 minutes then every 60 minutes)
+    #[arg(long, default_value = "true")]
+    sms_backoff: bool,
 }
 
 fn play_beep() {
@@ -110,6 +114,16 @@ async fn main() {
     let mut door_opened_time: Option<Instant> = None;
     let mut last_door_state: Option<bool> = None;
     let mut sms_sent = false;
+    let mut sms_backoff_index = 0;
+    let mut last_sms_time: Option<Instant> = None;
+    
+    // SMS backoff intervals: 5, 15, 30, 60 minutes, then every 60 minutes
+    let sms_intervals = vec![
+        Duration::from_secs(5 * 60),   // 5 minutes
+        Duration::from_secs(15 * 60),  // 15 minutes
+        Duration::from_secs(30 * 60),  // 30 minutes
+        Duration::from_secs(60 * 60),  // 60 minutes
+    ];
     
     let check_interval = Duration::from_secs(args.check_interval);
     let warning_threshold = Duration::from_secs(args.warning_threshold);
@@ -145,6 +159,8 @@ async fn main() {
                         }
                         door_opened_time = None;
                         sms_sent = false; // Reset SMS flag when door closes
+                        sms_backoff_index = 0; // Reset backoff index
+                        last_sms_time = None; // Reset last SMS time
                     } else {
                         door_opened_time = Some(Instant::now());
                     }
@@ -159,14 +175,50 @@ async fn main() {
                             println!("[{}] The door has been opened for too long ({:.1} seconds)", 
                                    timestamp, time_open.as_secs_f64());
                             
-                            // Send SMS once when threshold is reached
-                            if !sms_sent {
-                                println!("[{}] Preparing to send SMS...", timestamp);
-                                let message = format!("ALERT: Door has been open for {:.1} seconds", time_open.as_secs_f64());
-                                if let Err(e) = send_sms(&client, &args, &message).await {
-                                    eprintln!("[{}] Failed to send SMS: {}", timestamp, e);
+                            // SMS logic with backoff if enabled
+                            if args.sms_backoff {
+                                let should_send_sms = if !sms_sent {
+                                    // First SMS - send immediately when threshold is reached
+                                    true
+                                } else if let Some(last_sms) = last_sms_time {
+                                    // Determine next interval based on backoff index
+                                    let next_interval = if sms_backoff_index < sms_intervals.len() {
+                                        sms_intervals[sms_backoff_index]
+                                    } else {
+                                        Duration::from_secs(60 * 60) // Every 60 minutes after the initial intervals
+                                    };
+                                    
+                                    last_sms.elapsed() >= next_interval
+                                } else {
+                                    false
+                                };
+                                
+                                if should_send_sms {
+                                    println!("[{}] Preparing to send SMS (backoff index: {})...", timestamp, sms_backoff_index);
+                                    let message = if !sms_sent {
+                                        format!("ALERT: Door has been open for {:.1} seconds", time_open.as_secs_f64())
+                                    } else {
+                                        format!("REMINDER: Door still open for {:.1} seconds", time_open.as_secs_f64())
+                                    };
+                                    
+                                    if let Err(e) = send_sms(&client, &args, &message).await {
+                                        eprintln!("[{}] Failed to send SMS: {}", timestamp, e);
+                                    }
+                                    
+                                    sms_sent = true;
+                                    last_sms_time = Some(Instant::now());
+                                    sms_backoff_index += 1;
                                 }
-                                sms_sent = true;
+                            } else {
+                                // Original logic - send SMS only once
+                                if !sms_sent {
+                                    println!("[{}] Preparing to send SMS...", timestamp);
+                                    let message = format!("ALERT: Door has been open for {:.1} seconds", time_open.as_secs_f64());
+                                    if let Err(e) = send_sms(&client, &args, &message).await {
+                                        eprintln!("[{}] Failed to send SMS: {}", timestamp, e);
+                                    }
+                                    sms_sent = true;
+                                }
                             }
                         }
                     }
