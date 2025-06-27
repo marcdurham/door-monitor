@@ -14,6 +14,18 @@ struct DoorStatus {
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
+    /// Door sensor API URL
+    #[arg(long)]
+    api_url: String,
+
+    /// Check interval in seconds
+    #[arg(long, default_value = "5")]
+    check_interval: u64,
+
+    /// Warning threshold in seconds
+    #[arg(long, default_value = "15")]
+    warning_threshold: u64,
+
     /// SMS API Username for voip.ms
     #[arg(long)]
     sms_api_username: Option<String>,
@@ -30,10 +42,6 @@ struct Args {
     #[arg(long)]
     sms_to_phone_number: Option<String>,
 }
-
-const API_URL: &str = "http://192.168.1.226/rpc/Input.GetStatus?id=0";
-const CHECK_INTERVAL: Duration = Duration::from_secs(5);
-const WARNING_THRESHOLD: Duration = Duration::from_secs(15);
 
 fn play_beep() {
     // Send terminal bell character to make an audible beep
@@ -94,14 +102,20 @@ async fn main() {
     let args = Args::parse();
     
     println!("Door Monitor Starting...");
+    println!("API URL: {}", args.api_url);
+    println!("Check interval: {} seconds", args.check_interval);
+    println!("Warning threshold: {} seconds", args.warning_threshold);
     
     let client = reqwest::Client::new();
     let mut door_opened_time: Option<Instant> = None;
     let mut last_door_state: Option<bool> = None;
     let mut sms_sent = false;
     
+    let check_interval = Duration::from_secs(args.check_interval);
+    let warning_threshold = Duration::from_secs(args.warning_threshold);
+    
     loop {
-        match check_door_status(&client).await {
+        match check_door_status(&client, &args.api_url).await {
             Ok(door_status) => {
                 let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
                 let door_closed = door_status.state;  // TODO: Fix this, unnegate it
@@ -141,7 +155,7 @@ async fn main() {
                 if !door_closed {
                     if let Some(opened_time) = door_opened_time {
                         let time_open = opened_time.elapsed();
-                        if time_open >= WARNING_THRESHOLD {
+                        if time_open >= warning_threshold {
                             println!("[{}] The door has been opened for too long ({:.1} seconds)", 
                                    timestamp, time_open.as_secs_f64());
                             
@@ -164,12 +178,12 @@ async fn main() {
             }
         }
         
-        sleep(CHECK_INTERVAL).await;
+        sleep(check_interval).await;
     }
 }
 
-async fn check_door_status(client: &reqwest::Client) -> Result<DoorStatus, Box<dyn std::error::Error>> {
-    let response = client.get(API_URL).send().await?;
+async fn check_door_status(client: &reqwest::Client, api_url: &str) -> Result<DoorStatus, Box<dyn std::error::Error>> {
+    let response = client.get(api_url).send().await?;
     
     if response.status().is_success() {
         let door_status: DoorStatus = response.json().await?;
