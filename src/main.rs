@@ -28,13 +28,18 @@ async fn main() {
                 let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
                 let door_closed = door_status.state;
                 
-                // Check if door state has changed
+                // Always log the current door state
+                if door_closed {
+                    println!("[{}] The door is closed", timestamp);
+                } else {
+                    println!("[{}] The door is open", timestamp);
+                }
+                
+                // Track when door was opened for timing warnings
                 if last_door_state != Some(door_closed) {
                     if door_closed {
-                        println!("[{}] The door is closed", timestamp);
                         door_opened_time = None;
                     } else {
-                        println!("[{}] The door is open", timestamp);
                         door_opened_time = Some(Instant::now());
                     }
                     last_door_state = Some(door_closed);
