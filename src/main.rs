@@ -104,7 +104,7 @@ async fn main() {
         match check_door_status(&client).await {
             Ok(door_status) => {
                 let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
-                let door_closed = !door_status.state;  // TODO: Fix this, unnegate it
+                let door_closed = door_status.state;  // TODO: Fix this, unnegate it
                 
                 // Always log the current door state
                 if door_closed {
@@ -118,6 +118,17 @@ async fn main() {
                 // Track when door was opened for timing warnings
                 if last_door_state != Some(door_closed) {
                     if door_closed {
+                        // If door is now closed and we had sent an SMS about it being open too long
+                        if sms_sent {
+                            if let Some(opened_time) = door_opened_time {
+                                let total_time_open = opened_time.elapsed();
+                                let message = format!("Door is now closed after being open for {:.1} seconds", total_time_open.as_secs_f64());
+                                println!("[{}] Sending door closed SMS...", timestamp);
+                                if let Err(e) = send_sms(&client, &args, &message).await {
+                                    eprintln!("[{}] Failed to send door closed SMS: {}", timestamp, e);
+                                }
+                            }
+                        }
                         door_opened_time = None;
                         sms_sent = false; // Reset SMS flag when door closes
                     } else {
