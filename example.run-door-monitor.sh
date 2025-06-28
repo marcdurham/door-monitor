@@ -1,0 +1,9 @@
+
+cargo run -- \
+  --sms-to-phone-number 2065552222 \
+  --sms-api-username your@email.com \
+  --sms-api-password yourPassword \
+  --sms-from-phone-number 2065551111 \
+  --api-url http://192.168.1.226/rpc/Input.GetStatus\?id\=0 \
+  --check-interval 5 \
+  --warning-threshold 300
