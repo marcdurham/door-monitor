@@ -54,6 +54,14 @@ fn play_beep() {
     io::stdout().flush().unwrap();
 }
 
+fn format_duration(duration: Duration) -> String {
+    let total_seconds = duration.as_secs();
+    let hours = total_seconds / 3600;
+    let minutes = (total_seconds % 3600) / 60;
+    let seconds = total_seconds % 60;
+    format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
+}
+
 async fn send_sms(
     client: &reqwest::Client,
     args: &Args,
@@ -150,7 +158,7 @@ async fn main() {
                         if sms_sent {
                             if let Some(opened_time) = door_opened_time {
                                 let total_time_open = opened_time.elapsed();
-                                let message = format!("Door is now closed after being open for {:.1} seconds", total_time_open.as_secs_f64());
+                                let message = format!("Door is now closed after being open for {}", format_duration(total_time_open));
                                 println!("[{}] Sending door closed SMS...", timestamp);
                                 if let Err(e) = send_sms(&client, &args, &message).await {
                                     eprintln!("[{}] Failed to send door closed SMS: {}", timestamp, e);
@@ -172,8 +180,8 @@ async fn main() {
                     if let Some(opened_time) = door_opened_time {
                         let time_open = opened_time.elapsed();
                         if time_open >= warning_threshold {
-                            println!("[{}] The door has been opened for too long ({:.1} seconds)", 
-                                   timestamp, time_open.as_secs_f64());
+                            println!("[{}] The door has been opened for too long ({})", 
+                                   timestamp, format_duration(time_open));
                             
                             // SMS logic with backoff if enabled
                             if args.sms_backoff {
@@ -196,9 +204,9 @@ async fn main() {
                                 if should_send_sms {
                                     println!("[{}] Preparing to send SMS (backoff index: {})...", timestamp, sms_backoff_index);
                                     let message = if !sms_sent {
-                                        format!("ALERT: Door has been open for {:.1} seconds", time_open.as_secs_f64())
+                                        format!("ALERT: Door has been open for {}", format_duration(time_open))
                                     } else {
-                                        format!("REMINDER: Door still open for {:.1} seconds", time_open.as_secs_f64())
+                                        format!("REMINDER: Door still open for {}", format_duration(time_open))
                                     };
                                     
                                     if let Err(e) = send_sms(&client, &args, &message).await {
@@ -213,7 +221,7 @@ async fn main() {
                                 // Original logic - send SMS only once
                                 if !sms_sent {
                                     println!("[{}] Preparing to send SMS...", timestamp);
-                                    let message = format!("ALERT: Door has been open for {:.1} seconds", time_open.as_secs_f64());
+                                    let message = format!("ALERT: Door has been open for {}", format_duration(time_open));
                                     if let Err(e) = send_sms(&client, &args, &message).await {
                                         eprintln!("[{}] Failed to send SMS: {}", timestamp, e);
                                     }
