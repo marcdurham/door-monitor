@@ -44,22 +44,14 @@ pub async fn run_monitor(args: Args) {
     
     let client = reqwest::Client::new();
     let mut state = MonitorState::new();
-    
-    // SMS backoff intervals: 5, 15, 30, 60 minutes, then every 60 minutes
-    let sms_intervals = vec![
-        Duration::from_secs(5 * 60),   // 5 minutes
-        Duration::from_secs(15 * 60),  // 15 minutes
-        Duration::from_secs(30 * 60),  // 30 minutes
-        Duration::from_secs(60 * 60),  // 60 minutes
-    ];
-    
+
     let check_interval = Duration::from_secs(args.check_interval);
     let warning_threshold = Duration::from_secs(args.warning_threshold);
     
     loop {
         match check_door_status(&client, &args.api_url).await {
             Ok(door_status) => {
-                handle_door_status(&door_status, &mut state, &args, &client, &sms_intervals, warning_threshold).await;
+                handle_door_status(&door_status, &mut state, &args, &client, warning_threshold).await;
             }
             Err(e) => {
                 let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
@@ -76,9 +68,16 @@ async fn handle_door_status(
     state: &mut MonitorState,
     args: &Args,
     client: &reqwest::Client,
-    sms_intervals: &[Duration],
     warning_threshold: Duration,
 ) {
+    // SMS backoff intervals: 5, 15, 30, 60 minutes, then every 60 minutes
+    let sms_intervals = vec![
+        Duration::from_secs(5 * 60),   // 5 minutes
+        Duration::from_secs(15 * 60),  // 15 minutes
+        Duration::from_secs(30 * 60),  // 30 minutes
+        Duration::from_secs(60 * 60),  // 60 minutes
+    ];
+    
     let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
     let door_closed = door_status.state;
     
@@ -108,7 +107,7 @@ async fn handle_door_status(
     
     // Check if door has been open too long
     if !door_closed {
-        handle_door_open_too_long(state, args, client, sms_intervals, warning_threshold, &timestamp).await;
+        handle_door_open_too_long(state, args, client, &sms_intervals, warning_threshold, &timestamp).await;
     }
 }
 
