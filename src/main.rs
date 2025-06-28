@@ -56,10 +56,12 @@ fn play_beep() {
 
 fn format_duration(duration: Duration) -> String {
     let total_seconds = duration.as_secs();
-    let hours = total_seconds / 3600;
+    let days = total_seconds / 86400;
+    let hours = (total_seconds % 86400) / 3600;
     let minutes = (total_seconds % 3600) / 60;
     let seconds = total_seconds % 60;
-    format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
+    
+    format!("{} days {:02}:{:02}:{:02}", days, hours, minutes, seconds)
 }
 
 async fn send_sms(
