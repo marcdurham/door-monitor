@@ -36,13 +36,26 @@ impl MonitorState {
     }
 }
 
-/// Door monitoring struct that encapsulates the HTTP client and monitoring state.
+/// A door monitoring system that tracks door state and sends SMS notifications.
 /// 
-/// This struct manages all door monitoring functionality including:
-/// - Making HTTP requests to check door status
-/// - Tracking door state changes and durations  
-/// - Sending SMS alerts with configurable backoff intervals
+/// The DoorMonitor struct provides comprehensive door monitoring functionality including:
+/// - Polling a REST API to check door status
+/// - Logging door state changes with timestamps and durations
+/// - Playing audio alerts when the door opens
+/// - Sending SMS notifications for various events:
+///   * Initial status when program starts
+///   * Immediate notification when door opens
+///   * Notification when door closes (with duration open)
+///   * Progressive warnings if door stays open too long (with backoff)
 /// - Maintaining monitoring state across check cycles
+///
+/// ## SMS Notification Behavior
+/// 
+/// The monitor sends SMS messages for the following events:
+/// 1. **Program Start**: Initial status message with current door state
+/// 2. **Door Opens**: Immediate notification when door changes from closed to open
+/// 3. **Door Closes**: Notification when door changes from open to closed (includes duration)
+/// 4. **Door Open Too Long**: Progressive warnings if door exceeds warning threshold
 ///
 /// The struct owns a `reqwest::Client` for HTTP requests, which is more efficient
 /// than creating a new client for each request as it reuses connections.
@@ -68,6 +81,33 @@ impl DoorMonitor {
 
         let check_interval = Duration::from_secs(args.check_interval);
         let warning_threshold = Duration::from_secs(args.warning_threshold);
+        
+        // Send initial status SMS when program starts
+        match check_door_status(&self.client, &args.api_url).await {
+            Ok(door_status) => {
+                let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
+                let door_state_msg = if door_status.state { "closed" } else { "open" };
+                let message = format!("Door Monitor started. Current door state: {}", door_state_msg);
+                println!("[{}] Sending initial status SMS...", timestamp);
+                if let Err(e) = send_sms(&self.client, &args, &message).await {
+                    eprintln!("[{}] Failed to send initial status SMS: {}", timestamp, e);
+                }
+                
+                // Set initial state
+                if door_status.state {
+                    // Door is closed
+                    self.state.door_closed_time = Some(Instant::now());
+                } else {
+                    // Door is open
+                    self.state.door_opened_time = Some(Instant::now());
+                }
+                self.state.last_door_state = Some(door_status.state);
+            }
+            Err(e) => {
+                let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
+                eprintln!("[{}] Error checking initial door status: {}", timestamp, e);
+            }
+        }
         
         loop {
             match check_door_status(&self.client, &args.api_url).await {
@@ -130,22 +170,26 @@ impl DoorMonitor {
         timestamp: &str,
     ) {
         if door_closed {
-            // Door just closed
-            if self.state.sms_sent {
-                if let Some(opened_time) = self.state.door_opened_time {
-                    let total_time_open = opened_time.elapsed();
-                    let message = format!("Door is now closed after being open for {}", format_duration(total_time_open));
-                    println!("[{}] Sending door closed SMS...", timestamp);
-                    if let Err(e) = send_sms(&self.client, args, &message).await {
-                        eprintln!("[{}] Failed to send door closed SMS: {}", timestamp, e);
-                    }
+            // Door just closed - always send SMS if door was open
+            if let Some(opened_time) = self.state.door_opened_time {
+                let total_time_open = opened_time.elapsed();
+                let message = format!("Door is now closed after being open for {}", format_duration(total_time_open));
+                println!("[{}] Sending door closed SMS...", timestamp);
+                if let Err(e) = send_sms(&self.client, args, &message).await {
+                    eprintln!("[{}] Failed to send door closed SMS: {}", timestamp, e);
                 }
             }
             self.state.door_opened_time = None;
             self.state.door_closed_time = Some(Instant::now());
             self.state.reset_sms_state();
         } else {
-            // Door just opened
+            // Door just opened - send SMS immediately
+            let message = "Door has been opened".to_string();
+            println!("[{}] Sending door opened SMS...", timestamp);
+            if let Err(e) = send_sms(&self.client, args, &message).await {
+                eprintln!("[{}] Failed to send door opened SMS: {}", timestamp, e);
+            }
+            
             self.state.door_opened_time = Some(Instant::now());
             self.state.door_closed_time = None;
         }
@@ -331,6 +375,57 @@ mod tests {
         assert!(monitor.state.door_opened_time.is_none());
         assert!(monitor.state.door_closed_time.is_some());
         assert!(!monitor.state.sms_sent);
+        assert_eq!(monitor.state.sms_backoff_index, 0);
+    }
+
+    #[tokio::test]
+    async fn test_door_opening_sends_immediate_sms() {
+        use crate::config::Args;
+        use clap::Parser;
+        
+        let mut monitor = DoorMonitor::new();
+        let args = Args::try_parse_from(&[
+            "test", 
+            "--api-url", "http://test.com",
+            "--sms-api-username", "test_user",
+            "--sms-api-password", "test_pass",
+            "--sms-from-phone-number", "1234567890",
+            "--sms-to-phone-number", "0987654321"
+        ]).unwrap();
+        let timestamp = "2025-06-28 14:30:15 UTC";
+
+        // Simulate door opening - should trigger immediate SMS
+        monitor.handle_door_state_change(false, &args, timestamp).await;
+
+        assert!(monitor.state.door_opened_time.is_some());
+        assert!(monitor.state.door_closed_time.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_door_closing_always_sends_sms() {
+        use crate::config::Args;
+        use clap::Parser;
+        
+        let mut monitor = DoorMonitor::new();
+        // Set door as opened some time ago
+        monitor.state.door_opened_time = Some(Instant::now() - Duration::from_secs(300)); // 5 minutes ago
+        
+        let args = Args::try_parse_from(&[
+            "test", 
+            "--api-url", "http://test.com",
+            "--sms-api-username", "test_user",
+            "--sms-api-password", "test_pass",
+            "--sms-from-phone-number", "1234567890",
+            "--sms-to-phone-number", "0987654321"
+        ]).unwrap();
+        let timestamp = "2025-06-28 14:30:15 UTC";
+
+        // Simulate door closing - should always send SMS regardless of sms_sent state
+        monitor.handle_door_state_change(true, &args, timestamp).await;
+
+        assert!(monitor.state.door_opened_time.is_none());
+        assert!(monitor.state.door_closed_time.is_some());
+        assert!(!monitor.state.sms_sent); // Should be reset after closing
         assert_eq!(monitor.state.sms_backoff_index, 0);
     }
 }
