@@ -10,6 +10,7 @@ use crate::sms::send_sms;
 
 pub struct MonitorState {
     pub door_opened_time: Option<Instant>,
+    pub door_closed_time: Option<Instant>,
     pub last_door_state: Option<bool>,
     pub sms_sent: bool,
     pub sms_backoff_index: usize,
@@ -20,6 +21,7 @@ impl MonitorState {
     pub fn new() -> Self {
         Self {
             door_opened_time: None,
+            door_closed_time: None,
             last_door_state: None,
             sms_sent: false,
             sms_backoff_index: 0,
@@ -82,9 +84,19 @@ async fn handle_door_status(
     
     // Always log the current door state
     if door_closed {
-        println!("[{}] The door is closed", timestamp);
+        if let Some(closed_time) = state.door_closed_time {
+            let closed_duration = closed_time.elapsed();
+            println!("[{}] The door is closed (closed for {})", timestamp, format_duration(closed_duration));
+        } else {
+            println!("[{}] The door is closed", timestamp);
+        }
     } else {
-        println!("[{}] The door is open", timestamp);
+        if let Some(opened_time) = state.door_opened_time {
+            let open_duration = opened_time.elapsed();
+            println!("[{}] The door is open (open for {})", timestamp, format_duration(open_duration));
+        } else {
+            println!("[{}] The door is open", timestamp);
+        }
         play_beep();
     }
     
@@ -120,10 +132,12 @@ async fn handle_door_state_change(
             }
         }
         state.door_opened_time = None;
+        state.door_closed_time = Some(Instant::now());
         state.reset_sms_state();
     } else {
         // Door just opened
         state.door_opened_time = Some(Instant::now());
+        state.door_closed_time = None;
     }
 }
 
