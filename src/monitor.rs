@@ -76,11 +76,11 @@ impl DoorMonitor {
     pub async fn run(&mut self, args: Args) {
         println!("Door Monitor Starting...");
         println!("API URL: {}", args.api_url);
-        println!("Check interval: {} seconds", args.check_interval);
-        println!("Warning threshold: {} seconds", args.warning_threshold);
+        println!("Check interval: {} seconds", args.check_interval_seconds);
+        println!("Warning threshold: {} seconds", args.open_too_long_seconds);
 
-        let check_interval = Duration::from_secs(args.check_interval);
-        let warning_threshold = Duration::from_secs(args.warning_threshold);
+        let check_interval = Duration::from_secs(args.check_interval_seconds);
+        let warning_threshold = Duration::from_secs(args.open_too_long_seconds);
         
         // Send initial status SMS when program starts
         match check_door_status(&self.client, &args.api_url).await {
@@ -929,8 +929,8 @@ mod tests {
         // but we can test that it compiles and starts
         let args = crate::config::Args {
             api_url: "http://test.com".to_string(),
-            check_interval: 1,
-            warning_threshold: 5,
+            check_interval_seconds: 1,
+            open_too_long_seconds: 5,
             sms_api_username: None,
             sms_api_password: None,
             sms_from_phone_number: None,

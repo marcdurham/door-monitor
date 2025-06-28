@@ -5,5 +5,5 @@ cargo run -- \
   --sms-api-password yourPassword \
   --sms-from-phone-number 2065551111 \
   --api-url http://192.168.1.226/rpc/Input.GetStatus\?id\=0 \
-  --check-interval 5 \
-  --warning-threshold 300
+  --check-interval-seconds 5 \
+  --open-too-long-seconds 300

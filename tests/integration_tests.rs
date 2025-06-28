@@ -19,8 +19,8 @@ async fn test_door_monitor_integration() {
     let args = Args::try_parse_from(&[
         "door-monitor",
         "--api-url", &server.url(),
-        "--check-interval", "1",
-        "--warning-threshold", "5"
+        "--check-interval-seconds", "1",
+        "--open-too-long-seconds", "5"
     ]).unwrap();
 
     let client = reqwest::Client::new();
@@ -73,16 +73,16 @@ fn test_args_parsing_real_world_scenarios() {
         "--sms-api-password", "mypass",
         "--sms-from-phone-number", "5551234567",
         "--sms-to-phone-number", "5559876543",
-        "--check-interval", "10",
-        "--warning-threshold", "30"
+        "--check-interval-seconds", "10",
+        "--open-too-long-seconds", "30"
     ]).unwrap();
     
     assert!(args.sms_api_username.is_some());
     assert!(args.sms_api_password.is_some());
     assert!(args.sms_from_phone_number.is_some());
     assert!(args.sms_to_phone_number.is_some());
-    assert_eq!(args.check_interval, 10);
-    assert_eq!(args.warning_threshold, 30);
+    assert_eq!(args.check_interval_seconds, 10);
+    assert_eq!(args.open_too_long_seconds, 30);
 }
 
 #[tokio::test]

@@ -9,11 +9,11 @@ pub struct Args {
 
     /// Check interval in seconds
     #[arg(long, default_value = "5")]
-    pub check_interval: u64,
+    pub check_interval_seconds: u64,
 
-    /// Warning threshold in seconds
+    /// How many seconds is too long for the door to be open
     #[arg(long, default_value = "15")]
-    pub warning_threshold: u64,
+    pub open_too_long_seconds: u64,
 
     /// SMS API Username for voip.ms
     #[arg(long)]
@@ -55,8 +55,8 @@ mod tests {
         ]).unwrap();
 
         assert_eq!(args.api_url, "http://192.168.1.226/rpc/Input.GetStatus?id=0");
-        assert_eq!(args.check_interval, 5); // default
-        assert_eq!(args.warning_threshold, 15); // default
+        assert_eq!(args.check_interval_seconds, 5); // default
+        assert_eq!(args.open_too_long_seconds, 15); // default
         assert!(args.sms_backoff()); // default true
     }
 
@@ -65,8 +65,8 @@ mod tests {
         let args = Args::try_parse_from(&[
             "door-monitor",
             "--api-url", "http://test.com",
-            "--check-interval", "10",
-            "--warning-threshold", "30",
+            "--check-interval-seconds", "10",
+            "--open-too-long-seconds", "30",
             "--sms-api-username", "user123",
             "--sms-api-password", "pass456",
             "--sms-from-phone-number", "1234567890",
@@ -75,8 +75,8 @@ mod tests {
         ]).unwrap();
 
         assert_eq!(args.api_url, "http://test.com");
-        assert_eq!(args.check_interval, 10);
-        assert_eq!(args.warning_threshold, 30);
+        assert_eq!(args.check_interval_seconds, 10);
+        assert_eq!(args.open_too_long_seconds, 30);
         assert_eq!(args.sms_api_username, Some("user123".to_string()));
         assert_eq!(args.sms_api_password, Some("pass456".to_string()));
         assert_eq!(args.sms_from_phone_number, Some("1234567890".to_string()));
@@ -97,8 +97,8 @@ mod tests {
             "--api-url", "http://test.com"
         ]).unwrap();
 
-        assert_eq!(args.check_interval, 5);
-        assert_eq!(args.warning_threshold, 15);
+        assert_eq!(args.check_interval_seconds, 5);
+        assert_eq!(args.open_too_long_seconds, 15);
         assert!(args.sms_api_username.is_none());
         assert!(args.sms_api_password.is_none());
         assert!(args.sms_from_phone_number.is_none());
@@ -111,12 +111,12 @@ mod tests {
         let args = Args::try_parse_from(&[
             "door-monitor",
             "--api-url", "http://test.com",
-            "--check-interval", "1",
-            "--warning-threshold", "60"
+            "--check-interval-seconds", "1",
+            "--open-too-long-seconds", "60"
         ]).unwrap();
 
-        assert_eq!(args.check_interval, 1);
-        assert_eq!(args.warning_threshold, 60);
+        assert_eq!(args.check_interval_seconds, 1);
+        assert_eq!(args.open_too_long_seconds, 60);
     }
 
     #[test]
