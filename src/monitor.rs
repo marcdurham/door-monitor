@@ -156,7 +156,7 @@ async fn handle_door_open_too_long(
                    timestamp, format_duration(time_open));
             
             // SMS logic with backoff if enabled
-            if args.sms_backoff {
+            if args.sms_backoff() {
                 handle_sms_with_backoff(state, args, client, sms_intervals, time_open, timestamp).await;
             } else {
                 handle_single_sms(state, args, client, time_open, timestamp).await;
@@ -221,5 +221,88 @@ async fn handle_single_sms(
             eprintln!("[{}] Failed to send SMS: {}", timestamp, e);
         }
         state.sms_sent = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn test_monitor_state_new() {
+        let state = MonitorState::new();
+        assert!(state.door_opened_time.is_none());
+        assert!(state.door_closed_time.is_none());
+        assert!(state.last_door_state.is_none());
+        assert!(!state.sms_sent);
+        assert_eq!(state.sms_backoff_index, 0);
+        assert!(state.last_sms_time.is_none());
+    }
+
+    #[test]
+    fn test_monitor_state_reset_sms_state() {
+        let mut state = MonitorState::new();
+        state.sms_sent = true;
+        state.sms_backoff_index = 3;
+        state.last_sms_time = Some(Instant::now());
+
+        state.reset_sms_state();
+
+        assert!(!state.sms_sent);
+        assert_eq!(state.sms_backoff_index, 0);
+        assert!(state.last_sms_time.is_none());
+    }
+
+    #[test]
+    fn test_sms_intervals() {
+        let sms_intervals = vec![
+            Duration::from_secs(5 * 60),   // 5 minutes
+            Duration::from_secs(15 * 60),  // 15 minutes
+            Duration::from_secs(30 * 60),  // 30 minutes
+            Duration::from_secs(60 * 60),  // 60 minutes
+        ];
+
+        assert_eq!(sms_intervals[0], Duration::from_secs(300));
+        assert_eq!(sms_intervals[1], Duration::from_secs(900));
+        assert_eq!(sms_intervals[2], Duration::from_secs(1800));
+        assert_eq!(sms_intervals[3], Duration::from_secs(3600));
+    }
+
+    #[tokio::test]
+    async fn test_handle_door_state_change_door_opens() {
+        use crate::config::Args;
+        use clap::Parser;
+        
+        let mut state = MonitorState::new();
+        let args = Args::try_parse_from(&["test", "--api-url", "http://test.com"]).unwrap();
+        let client = reqwest::Client::new();
+        let timestamp = "2025-06-28 14:30:15 UTC";
+
+        // Simulate door opening
+        handle_door_state_change(false, &mut state, &args, &client, timestamp).await;
+
+        assert!(state.door_opened_time.is_some());
+        assert!(state.door_closed_time.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_handle_door_state_change_door_closes() {
+        use crate::config::Args;
+        use clap::Parser;
+        
+        let mut state = MonitorState::new();
+        state.door_opened_time = Some(Instant::now());
+        let args = Args::try_parse_from(&["test", "--api-url", "http://test.com"]).unwrap();
+        let client = reqwest::Client::new();
+        let timestamp = "2025-06-28 14:30:15 UTC";
+
+        // Simulate door closing
+        handle_door_state_change(true, &mut state, &args, &client, timestamp).await;
+
+        assert!(state.door_opened_time.is_none());
+        assert!(state.door_closed_time.is_some());
+        assert!(!state.sms_sent);
+        assert_eq!(state.sms_backoff_index, 0);
     }
 }
