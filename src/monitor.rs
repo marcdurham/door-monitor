@@ -70,14 +70,6 @@ async fn handle_door_status(
     client: &reqwest::Client,
     warning_threshold: Duration,
 ) {
-    // SMS backoff intervals: 5, 15, 30, 60 minutes, then every 60 minutes
-    let sms_intervals = vec![
-        Duration::from_secs(5 * 60),   // 5 minutes
-        Duration::from_secs(15 * 60),  // 15 minutes
-        Duration::from_secs(30 * 60),  // 30 minutes
-        Duration::from_secs(60 * 60),  // 60 minutes
-    ];
-    
     let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
     let door_closed = door_status.state;
     
@@ -107,7 +99,7 @@ async fn handle_door_status(
     
     // Check if door has been open too long
     if !door_closed {
-        handle_door_open_too_long(state, args, client, &sms_intervals, warning_threshold, &timestamp).await;
+        handle_door_open_too_long(state, args, client, warning_threshold, &timestamp).await;
     }
 }
 
@@ -144,7 +136,6 @@ async fn handle_door_open_too_long(
     state: &mut MonitorState,
     args: &Args,
     client: &reqwest::Client,
-    sms_intervals: &[Duration],
     warning_threshold: Duration,
     timestamp: &str,
 ) {
@@ -156,7 +147,7 @@ async fn handle_door_open_too_long(
             
             // SMS logic with backoff if enabled
             if args.sms_backoff() {
-                handle_sms_with_backoff(state, args, client, sms_intervals, time_open, timestamp).await;
+                handle_sms_with_backoff(state, args, client, time_open, timestamp).await;
             } else {
                 handle_single_sms(state, args, client, time_open, timestamp).await;
             }
@@ -168,10 +159,17 @@ async fn handle_sms_with_backoff(
     state: &mut MonitorState,
     args: &Args,
     client: &reqwest::Client,
-    sms_intervals: &[Duration],
     time_open: Duration,
     timestamp: &str,
 ) {
+    // SMS backoff intervals: 5, 15, 30, 60 minutes, then every 60 minutes
+    let sms_intervals = vec![
+        Duration::from_secs(5 * 60),   // 5 minutes
+        Duration::from_secs(15 * 60),  // 15 minutes
+        Duration::from_secs(30 * 60),  // 30 minutes
+        Duration::from_secs(60 * 60),  // 60 minutes
+    ];
+
     let should_send_sms = if !state.sms_sent {
         // First SMS - send immediately when threshold is reached
         true
