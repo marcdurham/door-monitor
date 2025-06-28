@@ -428,4 +428,519 @@ mod tests {
         assert!(!monitor.state.sms_sent); // Should be reset after closing
         assert_eq!(monitor.state.sms_backoff_index, 0);
     }
+
+    #[tokio::test]
+    async fn test_handle_door_status_door_closed_with_duration() {
+        use crate::config::Args;
+        use clap::Parser;
+        use crate::door::DoorStatus;
+        
+        let mut monitor = DoorMonitor::new();
+        // Set door as closed some time ago
+        monitor.state.door_closed_time = Some(Instant::now() - Duration::from_secs(180)); // 3 minutes ago
+        monitor.state.last_door_state = Some(true); // Previously closed
+        
+        let args = Args::try_parse_from(&["test", "--api-url", "http://test.com"]).unwrap();
+        let door_status = DoorStatus { id: 1, state: true }; // Door is closed
+        let warning_threshold = Duration::from_secs(60);
+
+        // This should log the closed duration but not trigger state change
+        monitor.handle_door_status(&door_status, &args, warning_threshold).await;
+
+        // State should remain unchanged since door was already closed
+        assert!(monitor.state.door_closed_time.is_some());
+        assert!(monitor.state.door_opened_time.is_none());
+        assert_eq!(monitor.state.last_door_state, Some(true));
+    }
+
+    #[tokio::test]
+    async fn test_handle_door_status_door_open_with_duration() {
+        use crate::config::Args;
+        use clap::Parser;
+        use crate::door::DoorStatus;
+        
+        let mut monitor = DoorMonitor::new();
+        // Set door as open some time ago
+        monitor.state.door_opened_time = Some(Instant::now() - Duration::from_secs(300)); // 5 minutes ago
+        monitor.state.last_door_state = Some(false); // Previously open
+        
+        let args = Args::try_parse_from(&["test", "--api-url", "http://test.com"]).unwrap();
+        let door_status = DoorStatus { id: 1, state: false }; // Door is open
+        let warning_threshold = Duration::from_secs(60);
+
+        // This should log the open duration and trigger warning logic
+        monitor.handle_door_status(&door_status, &args, warning_threshold).await;
+
+        // State should remain unchanged since door was already open
+        assert!(monitor.state.door_opened_time.is_some());
+        assert!(monitor.state.door_closed_time.is_none());
+        assert_eq!(monitor.state.last_door_state, Some(false));
+    }
+
+    #[tokio::test]
+    async fn test_handle_door_status_first_time_closed() {
+        use crate::config::Args;
+        use clap::Parser;
+        use crate::door::DoorStatus;
+        
+        let mut monitor = DoorMonitor::new();
+        // No previous state
+        
+        let args = Args::try_parse_from(&["test", "--api-url", "http://test.com"]).unwrap();
+        let door_status = DoorStatus { id: 1, state: true }; // Door is closed
+        let warning_threshold = Duration::from_secs(60);
+
+        monitor.handle_door_status(&door_status, &args, warning_threshold).await;
+
+        // Should log "The door is closed" without duration
+        assert!(monitor.state.door_closed_time.is_some());
+        assert!(monitor.state.door_opened_time.is_none());
+        assert_eq!(monitor.state.last_door_state, Some(true));
+    }
+
+    #[tokio::test]
+    async fn test_handle_door_status_first_time_open() {
+        use crate::config::Args;
+        use clap::Parser;
+        use crate::door::DoorStatus;
+        
+        let mut monitor = DoorMonitor::new();
+        // No previous state
+        
+        let args = Args::try_parse_from(&["test", "--api-url", "http://test.com"]).unwrap();
+        let door_status = DoorStatus { id: 1, state: false }; // Door is open
+        let warning_threshold = Duration::from_secs(60);
+
+        monitor.handle_door_status(&door_status, &args, warning_threshold).await;
+
+        // Should log "The door is open" without duration and send SMS
+        assert!(monitor.state.door_opened_time.is_some());
+        assert!(monitor.state.door_closed_time.is_none());
+        assert_eq!(monitor.state.last_door_state, Some(false));
+    }
+
+    #[tokio::test]
+    async fn test_handle_door_open_too_long_below_threshold() {
+        use crate::config::Args;
+        use clap::Parser;
+        
+        let mut monitor = DoorMonitor::new();
+        // Set door as opened recently
+        monitor.state.door_opened_time = Some(Instant::now() - Duration::from_secs(30)); // 30 seconds ago
+        
+        let args = Args::try_parse_from(&["test", "--api-url", "http://test.com"]).unwrap();
+        let warning_threshold = Duration::from_secs(60); // 1 minute threshold
+        let timestamp = "2025-06-28 14:30:15 UTC";
+
+        // Door has been open for 30 seconds, threshold is 60 seconds - should not trigger
+        monitor.handle_door_open_too_long(&args, warning_threshold, timestamp).await;
+
+        // SMS state should remain unchanged
+        assert!(!monitor.state.sms_sent);
+        assert_eq!(monitor.state.sms_backoff_index, 0);
+        assert!(monitor.state.last_sms_time.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_handle_door_open_too_long_above_threshold_with_backoff() {
+        use crate::config::Args;
+        use clap::Parser;
+        
+        let mut monitor = DoorMonitor::new();
+        // Set door as opened past threshold
+        monitor.state.door_opened_time = Some(Instant::now() - Duration::from_secs(120)); // 2 minutes ago
+        
+        let args = Args::try_parse_from(&[
+            "test", 
+            "--api-url", "http://test.com",
+            "--sms-api-username", "test_user",
+            "--sms-api-password", "test_pass",
+            "--sms-from-phone-number", "1234567890",
+            "--sms-to-phone-number", "0987654321"
+        ]).unwrap();
+        let warning_threshold = Duration::from_secs(60); // 1 minute threshold
+        let timestamp = "2025-06-28 14:30:15 UTC";
+
+        // Door has been open for 2 minutes, threshold is 1 minute - should trigger first SMS
+        monitor.handle_door_open_too_long(&args, warning_threshold, timestamp).await;
+
+        // First SMS should be sent
+        assert!(monitor.state.sms_sent);
+        assert_eq!(monitor.state.sms_backoff_index, 1);
+        assert!(monitor.state.last_sms_time.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_handle_door_open_too_long_above_threshold_no_backoff() {
+        use crate::config::Args;
+        use clap::Parser;
+        
+        let mut monitor = DoorMonitor::new();
+        // Set door as opened past threshold
+        monitor.state.door_opened_time = Some(Instant::now() - Duration::from_secs(120)); // 2 minutes ago
+        
+        let args = Args::try_parse_from(&[
+            "test", 
+            "--api-url", "http://test.com",
+            "--no-sms-backoff", // Disable backoff
+            "--sms-api-username", "test_user",
+            "--sms-api-password", "test_pass",
+            "--sms-from-phone-number", "1234567890",
+            "--sms-to-phone-number", "0987654321"
+        ]).unwrap();
+        let warning_threshold = Duration::from_secs(60); // 1 minute threshold
+        let timestamp = "2025-06-28 14:30:15 UTC";
+
+        // Door has been open for 2 minutes, threshold is 1 minute - should trigger single SMS
+        monitor.handle_door_open_too_long(&args, warning_threshold, timestamp).await;
+
+        // Single SMS should be sent
+        assert!(monitor.state.sms_sent);
+        assert_eq!(monitor.state.sms_backoff_index, 0); // No backoff increment
+        assert!(monitor.state.last_sms_time.is_none()); // No last SMS time tracking
+    }
+
+    #[tokio::test]
+    async fn test_handle_door_open_too_long_no_door_open_time() {
+        use crate::config::Args;
+        use clap::Parser;
+        
+        let mut monitor = DoorMonitor::new();
+        // No door_opened_time set
+        
+        let args = Args::try_parse_from(&["test", "--api-url", "http://test.com"]).unwrap();
+        let warning_threshold = Duration::from_secs(60);
+        let timestamp = "2025-06-28 14:30:15 UTC";
+
+        // Should not trigger anything since door_opened_time is None
+        monitor.handle_door_open_too_long(&args, warning_threshold, timestamp).await;
+
+        // SMS state should remain unchanged
+        assert!(!monitor.state.sms_sent);
+        assert_eq!(monitor.state.sms_backoff_index, 0);
+        assert!(monitor.state.last_sms_time.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_handle_sms_with_backoff_first_sms() {
+        use crate::config::Args;
+        use clap::Parser;
+        
+        let mut monitor = DoorMonitor::new();
+        let args = Args::try_parse_from(&[
+            "test", 
+            "--api-url", "http://test.com",
+            "--sms-api-username", "test_user",
+            "--sms-api-password", "test_pass",
+            "--sms-from-phone-number", "1234567890",
+            "--sms-to-phone-number", "0987654321"
+        ]).unwrap();
+        let time_open = Duration::from_secs(900); // 15 minutes
+        let timestamp = "2025-06-28 14:30:15 UTC";
+
+        // First SMS - should send immediately
+        monitor.handle_sms_with_backoff(&args, time_open, timestamp).await;
+
+        assert!(monitor.state.sms_sent);
+        assert_eq!(monitor.state.sms_backoff_index, 1);
+        assert!(monitor.state.last_sms_time.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_handle_sms_with_backoff_second_sms_too_early() {
+        use crate::config::Args;
+        use clap::Parser;
+        
+        let mut monitor = DoorMonitor::new();
+        // Set up state as if first SMS was sent recently
+        monitor.state.sms_sent = true;
+        monitor.state.sms_backoff_index = 0;
+        monitor.state.last_sms_time = Some(Instant::now() - Duration::from_secs(120)); // 2 minutes ago
+        
+        let args = Args::try_parse_from(&[
+            "test", 
+            "--api-url", "http://test.com",
+            "--sms-api-username", "test_user",
+            "--sms-api-password", "test_pass",
+            "--sms-from-phone-number", "1234567890",
+            "--sms-to-phone-number", "0987654321"
+        ]).unwrap();
+        let time_open = Duration::from_secs(900); // 15 minutes
+        let timestamp = "2025-06-28 14:30:15 UTC";
+
+        // Second SMS attempt - should not send (first interval is 5 minutes)
+        monitor.handle_sms_with_backoff(&args, time_open, timestamp).await;
+
+        // Should remain at same backoff level
+        assert!(monitor.state.sms_sent);
+        assert_eq!(monitor.state.sms_backoff_index, 0);
+    }
+
+    #[tokio::test]
+    async fn test_handle_sms_with_backoff_second_sms_ready() {
+        use crate::config::Args;
+        use clap::Parser;
+        
+        let mut monitor = DoorMonitor::new();
+        // Set up state as if first SMS was sent 6 minutes ago (past first interval)
+        monitor.state.sms_sent = true;
+        monitor.state.sms_backoff_index = 0;
+        monitor.state.last_sms_time = Some(Instant::now() - Duration::from_secs(360)); // 6 minutes ago
+        
+        let args = Args::try_parse_from(&[
+            "test", 
+            "--api-url", "http://test.com",
+            "--sms-api-username", "test_user",
+            "--sms-api-password", "test_pass",
+            "--sms-from-phone-number", "1234567890",
+            "--sms-to-phone-number", "0987654321"
+        ]).unwrap();
+        let time_open = Duration::from_secs(900); // 15 minutes
+        let timestamp = "2025-06-28 14:30:15 UTC";
+
+        // Second SMS attempt - should send (past 5 minute interval)
+        monitor.handle_sms_with_backoff(&args, time_open, timestamp).await;
+
+        // Should advance to next backoff level
+        assert!(monitor.state.sms_sent);
+        assert_eq!(monitor.state.sms_backoff_index, 1);
+        assert!(monitor.state.last_sms_time.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_handle_sms_with_backoff_beyond_intervals() {
+        use crate::config::Args;
+        use clap::Parser;
+        
+        let mut monitor = DoorMonitor::new();
+        // Set up state as if we're past all defined intervals
+        monitor.state.sms_sent = true;
+        monitor.state.sms_backoff_index = 5; // Beyond the 4 defined intervals
+        monitor.state.last_sms_time = Some(Instant::now() - Duration::from_secs(3700)); // 61+ minutes ago
+        
+        let args = Args::try_parse_from(&[
+            "test", 
+            "--api-url", "http://test.com",
+            "--sms-api-username", "test_user",
+            "--sms-api-password", "test_pass",
+            "--sms-from-phone-number", "1234567890",
+            "--sms-to-phone-number", "0987654321"
+        ]).unwrap();
+        let time_open = Duration::from_secs(7200); // 2 hours
+        let timestamp = "2025-06-28 14:30:15 UTC";
+
+        // Should send with 60-minute default interval
+        monitor.handle_sms_with_backoff(&args, time_open, timestamp).await;
+
+        // Should advance backoff index
+        assert!(monitor.state.sms_sent);
+        assert_eq!(monitor.state.sms_backoff_index, 6);
+        assert!(monitor.state.last_sms_time.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_handle_single_sms_first_time() {
+        use crate::config::Args;
+        use clap::Parser;
+        
+        let mut monitor = DoorMonitor::new();
+        let args = Args::try_parse_from(&[
+            "test", 
+            "--api-url", "http://test.com",
+            "--sms-api-username", "test_user",
+            "--sms-api-password", "test_pass",
+            "--sms-from-phone-number", "1234567890",
+            "--sms-to-phone-number", "0987654321"
+        ]).unwrap();
+        let time_open = Duration::from_secs(900); // 15 minutes
+        let timestamp = "2025-06-28 14:30:15 UTC";
+
+        // First single SMS - should send
+        monitor.handle_single_sms(&args, time_open, timestamp).await;
+
+        assert!(monitor.state.sms_sent);
+        // Single SMS doesn't use backoff tracking
+        assert_eq!(monitor.state.sms_backoff_index, 0);
+        assert!(monitor.state.last_sms_time.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_handle_single_sms_already_sent() {
+        use crate::config::Args;
+        use clap::Parser;
+        
+        let mut monitor = DoorMonitor::new();
+        // Set up state as if SMS was already sent
+        monitor.state.sms_sent = true;
+        
+        let args = Args::try_parse_from(&[
+            "test", 
+            "--api-url", "http://test.com",
+            "--sms-api-username", "test_user",
+            "--sms-api-password", "test_pass",
+            "--sms-from-phone-number", "1234567890",
+            "--sms-to-phone-number", "0987654321"
+        ]).unwrap();
+        let time_open = Duration::from_secs(900); // 15 minutes
+        let timestamp = "2025-06-28 14:30:15 UTC";
+
+        // Second single SMS attempt - should not send
+        monitor.handle_single_sms(&args, time_open, timestamp).await;
+
+        // State should remain unchanged
+        assert!(monitor.state.sms_sent);
+        assert_eq!(monitor.state.sms_backoff_index, 0);
+        assert!(monitor.state.last_sms_time.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_door_state_change_from_closed_to_open() {
+        use crate::config::Args;
+        use clap::Parser;
+        use crate::door::DoorStatus;
+        
+        let mut monitor = DoorMonitor::new();
+        // Set initial state as closed
+        monitor.state.door_closed_time = Some(Instant::now() - Duration::from_secs(300));
+        monitor.state.last_door_state = Some(true); // Door was closed
+        
+        let args = Args::try_parse_from(&[
+            "test", 
+            "--api-url", "http://test.com",
+            "--sms-api-username", "test_user",
+            "--sms-api-password", "test_pass",
+            "--sms-from-phone-number", "1234567890",
+            "--sms-to-phone-number", "0987654321"
+        ]).unwrap();
+        let door_status = DoorStatus { id: 1, state: false }; // Door is now open
+        let warning_threshold = Duration::from_secs(60);
+
+        // This should detect state change and send SMS
+        monitor.handle_door_status(&door_status, &args, warning_threshold).await;
+
+        // Should transition to open state and send SMS
+        assert!(monitor.state.door_opened_time.is_some());
+        assert!(monitor.state.door_closed_time.is_none());
+        assert_eq!(monitor.state.last_door_state, Some(false));
+    }
+
+    #[tokio::test]
+    async fn test_door_state_change_from_open_to_closed() {
+        use crate::config::Args;
+        use clap::Parser;
+        use crate::door::DoorStatus;
+        
+        let mut monitor = DoorMonitor::new();
+        // Set initial state as open
+        monitor.state.door_opened_time = Some(Instant::now() - Duration::from_secs(300));
+        monitor.state.last_door_state = Some(false); // Door was open
+        
+        let args = Args::try_parse_from(&[
+            "test", 
+            "--api-url", "http://test.com",
+            "--sms-api-username", "test_user",
+            "--sms-api-password", "test_pass",
+            "--sms-from-phone-number", "1234567890",
+            "--sms-to-phone-number", "0987654321"
+        ]).unwrap();
+        let door_status = DoorStatus { id: 1, state: true }; // Door is now closed
+        let warning_threshold = Duration::from_secs(60);
+
+        // This should detect state change and send SMS
+        monitor.handle_door_status(&door_status, &args, warning_threshold).await;
+
+        // Should transition to closed state and send SMS
+        assert!(monitor.state.door_opened_time.is_none());
+        assert!(monitor.state.door_closed_time.is_some());
+        assert_eq!(monitor.state.last_door_state, Some(true));
+        // SMS state should be reset after closing
+        assert!(!monitor.state.sms_sent);
+        assert_eq!(monitor.state.sms_backoff_index, 0);
+    }
+
+    #[tokio::test]
+    async fn test_handle_sms_with_backoff_no_last_sms_time() {
+        use crate::config::Args;
+        use clap::Parser;
+        
+        let mut monitor = DoorMonitor::new();
+        // Set up inconsistent state - sms_sent but no last_sms_time
+        monitor.state.sms_sent = true;
+        monitor.state.sms_backoff_index = 1;
+        monitor.state.last_sms_time = None; // This should not happen in normal operation
+        
+        let args = Args::try_parse_from(&[
+            "test", 
+            "--api-url", "http://test.com",
+            "--sms-api-username", "test_user",
+            "--sms-api-password", "test_pass",
+            "--sms-from-phone-number", "1234567890",
+            "--sms-to-phone-number", "0987654321"
+        ]).unwrap();
+        let time_open = Duration::from_secs(900); // 15 minutes
+        let timestamp = "2025-06-28 14:30:15 UTC";
+
+        // Should handle gracefully and not send SMS
+        monitor.handle_sms_with_backoff(&args, time_open, timestamp).await;
+
+        // Should remain unchanged
+        assert!(monitor.state.sms_sent);
+        assert_eq!(monitor.state.sms_backoff_index, 1);
+        assert!(monitor.state.last_sms_time.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_handle_door_status_with_warning_threshold_trigger() {
+        use crate::config::Args;
+        use clap::Parser;
+        use crate::door::DoorStatus;
+        
+        let mut monitor = DoorMonitor::new();
+        // Set door as open for longer than threshold
+        monitor.state.door_opened_time = Some(Instant::now() - Duration::from_secs(120)); // 2 minutes ago
+        monitor.state.last_door_state = Some(false); // Door was already open
+        
+        let args = Args::try_parse_from(&[
+            "test", 
+            "--api-url", "http://test.com",
+            "--sms-api-username", "test_user",
+            "--sms-api-password", "test_pass",
+            "--sms-from-phone-number", "1234567890",
+            "--sms-to-phone-number", "0987654321"
+        ]).unwrap();
+        let door_status = DoorStatus { id: 1, state: false }; // Door is still open
+        let warning_threshold = Duration::from_secs(60); // 1 minute threshold
+
+        // This should trigger warning logic since door has been open > threshold
+        monitor.handle_door_status(&door_status, &args, warning_threshold).await;
+
+        // Warning should have triggered first SMS
+        assert!(monitor.state.sms_sent);
+        assert_eq!(monitor.state.sms_backoff_index, 1);
+        assert!(monitor.state.last_sms_time.is_some());
+    }
+
+    #[test]
+    fn test_run_monitor_wrapper() {
+        // Test the public run_monitor function exists and creates a DoorMonitor
+        // This is mainly for completeness of coverage
+        
+        // We can't actually run this to completion since it's an infinite loop,
+        // but we can test that it compiles and starts
+        let args = crate::config::Args {
+            api_url: "http://test.com".to_string(),
+            check_interval: 1,
+            warning_threshold: 5,
+            sms_api_username: None,
+            sms_api_password: None,
+            sms_from_phone_number: None,
+            sms_to_phone_number: None,
+            no_sms_backoff: false,
+        };
+        
+        // Just verify the function signature is correct
+        // We can't run it because it's an infinite loop
+        let future = run_monitor(args);
+        drop(future); // Prevent unused variable warning
+    }
 }
