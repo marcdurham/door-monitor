@@ -1,4 +1,4 @@
-use crate::Args;
+use crate::config::Args;
 
 pub async fn send_sms(
     client: &reqwest::Client,
