@@ -175,7 +175,22 @@ echo -e "${GREEN}✅ SSH connection successful${NC}"
 
 # Stop any running instance
 echo -e "${GREEN}🛑 Stopping any running door-monitor instances${NC}"
-ssh "$PI_USER@$PI_HOST" "sudo pkill -f '$BINARY_NAME' || true"
+echo "Debug: Attempting to stop processes matching '$BINARY_NAME' on $PI_USER@$PI_HOST"
+
+# First, check if any processes are running
+if ssh "$PI_USER@$PI_HOST" "pgrep -f '$BINARY_NAME'" >/dev/null 2>&1; then
+    echo "Found running processes, attempting to stop them..."
+    if ssh "$PI_USER@$PI_HOST" "sudo pkill -f '$BINARY_NAME'"; then
+        echo "✅ Successfully stopped running processes"
+        # Give processes time to terminate gracefully
+        sleep 2
+    else
+        echo "⚠️  Failed to stop processes gracefully, trying force kill..."
+        ssh "$PI_USER@$PI_HOST" "sudo pkill -9 -f '$BINARY_NAME'" || true
+    fi
+else
+    echo "✅ No running processes found (this is normal)"
+fi
 
 # Copy binary to Pi
 echo -e "${GREEN}📤 Copying binary to $PI_HOST${NC}"
