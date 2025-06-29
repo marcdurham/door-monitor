@@ -6,7 +6,7 @@
 set -e
 
 # Configuration
-DEFAULT_PI_USER="pi"
+DEFAULT_PI_USER="$USER"
 DEFAULT_PI_HOST=""
 DEFAULT_TARGET="arm-unknown-linux-gnueabihf"  # Pi Zero/1 default
 BINARY_NAME="door-monitor"
@@ -186,7 +186,7 @@ echo -e "${GREEN}🔐 Making binary executable${NC}"
 ssh "$PI_USER@$PI_HOST" "chmod +x $REMOTE_PATH"
 
 # Create systemd service file
-echo -e "${GREEN}⚙️  Creating systemd service${NC}"
+echo -e "${GREEN}⚙️ Creating systemd service${NC}"
 ssh "$PI_USER@$PI_HOST" "sudo tee /etc/systemd/system/door-monitor.service > /dev/null" << EOF
 [Unit]
 Description=Door Monitor Service
