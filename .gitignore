@@ -2,3 +2,4 @@
 .vscode/launch.json
 /run-door-monitor.sh
 lcov.info
+.cargo/config.toml
