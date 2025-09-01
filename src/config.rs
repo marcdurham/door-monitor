@@ -15,6 +15,10 @@ pub struct Args {
     #[arg(long, default_value = "15")]
     pub open_too_long_seconds: u64,
 
+    /// Disable SMS, ignores SMS arguments
+    #[arg(long)]
+    pub sms_off: bool,
+
     /// SMS API Username for voip.ms
     #[arg(long)]
     pub sms_api_username: Option<String>,
@@ -34,6 +38,10 @@ pub struct Args {
     /// Disable SMS backoff (send only one SMS instead of progressive intervals)
     #[arg(long)]
     pub no_sms_backoff: bool,
+
+    /// Telegram Off, arguments ignored
+    #[arg(long)]
+    pub telegram_off: bool,
 
     /// Telegram Token
     #[arg(long)]
@@ -83,27 +91,30 @@ mod tests {
             "--api-url", "http://test.com",
             "--check-interval-seconds", "10",
             "--open-too-long-seconds", "30",
+            "--sms-off",
             "--sms-api-username", "user123",
             "--sms-api-password", "pass456",
             "--sms-from-phone-number", "1234567890",
             "--sms-to-phone-number", "0987654321",
             "--no-sms-backoff",
+            "--telegram-off",
             "--telegram-token", "2345:TEsttoKEN",
             "--telegram-conversation-id", "345678",
             "--telegram-test",
-            "--test-message", "test message 1"
+            "--test-message", "test message 1",
         ]).unwrap();
 
         assert_eq!(args.api_url, Some("http://test.com"));
         assert_eq!(args.check_interval_seconds, 10);
         assert_eq!(args.open_too_long_seconds, 30);
+        assert!(args.sms_off);
         assert_eq!(args.sms_api_username, Some("user123".to_string()));
         assert_eq!(args.sms_api_password, Some("pass456".to_string()));
         assert_eq!(args.sms_from_phone_number, Some("1234567890".to_string()));
         assert_eq!(args.sms_to_phone_number, Some("0987654321".to_string()));
-
         assert_eq!(args.telegram_token, Some("2345:TEsttoKEN".to_string()));
         assert_eq!(args.telegram_conversation_id, Some("345678".to_string()));
+        assert!(args.telegram_off);
         assert!(args.telegram_test);
         assert_eq!(args.test_message, Some("test message 1".to_string()));
         assert!(!args.sms_backoff());

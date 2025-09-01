@@ -88,6 +88,8 @@ impl DoorMonitor {
         println!("API URL: {}", args.api_url.clone().unwrap_or("".to_string()).as_str());
         println!("Check interval: {} seconds", args.check_interval_seconds);
         println!("Warning threshold: {} seconds", args.open_too_long_seconds);
+        println!("SMS Off: {}", args.sms_off);
+        println!("Telegram Off: {}", args.telegram_off);
 
         let check_interval = Duration::from_secs(args.check_interval_seconds);
         let warning_threshold = Duration::from_secs(args.open_too_long_seconds);
@@ -98,14 +100,19 @@ impl DoorMonitor {
                 let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
                 let door_state_msg = if door_status.state { "closed" } else { "open" };
                 let message = format!("Door Monitor started. Current door state: {}", door_state_msg);
-                println!("[{}] Sending initial status SMS...", timestamp);
-                if let Err(e) = send_sms(&self.client, &args, &message).await {
-                    eprintln!("[{}] Failed to send initial status SMS: {}", timestamp, e);
-                }
 
-                println!("[{}] Sending initial status Telegram...", timestamp);
-                if let Err(e) = send_telegram(&self.client, &args, &message).await {
-                    eprintln!("[{}] Failed to send initial status Telegram: {}", timestamp, e);
+                if !args.sms_off {
+                    println!("[{}] Sending initial status SMS...", timestamp);
+                    if let Err(e) = send_sms(&self.client, &args, &message).await {
+                        eprintln!("[{}] Failed to send initial status SMS: {}", timestamp, e);
+                    }
+                }
+                
+                if !args.telegram_off {
+                    println!("[{}] Sending initial status Telegram...", timestamp);
+                    if let Err(e) = send_telegram(&self.client, &args, &message).await {
+                        eprintln!("[{}] Failed to send initial status Telegram: {}", timestamp, e);
+                    }
                 }
                 
                 // Set initial state
@@ -189,9 +196,18 @@ impl DoorMonitor {
             if let Some(opened_time) = self.state.door_opened_time {
                 let total_time_open = opened_time.elapsed();
                 let message = format!("Door is now closed after being open for {}", format_duration(total_time_open));
-                println!("[{}] Sending door closed SMS...", timestamp);
-                if let Err(e) = send_sms(&self.client, args, &message).await {
-                    eprintln!("[{}] Failed to send door closed SMS: {}", timestamp, e);
+                if !args.sms_off {
+                    println!("[{}] Sending door closed SMS...", timestamp);
+                    if let Err(e) = send_sms(&self.client, args, &message).await {
+                        eprintln!("[{}] Failed to send door closed SMS: {}", timestamp, e);
+                    }
+                }
+
+                if !args.telegram_off {
+                    println!("[{}] Sending door closed Telegram...", timestamp);
+                    if let Err(e) = send_telegram(&self.client, args, &message).await {
+                        eprintln!("[{}] Failed to send door closed Telegram: {}", timestamp, e);
+                    }
                 }
             }
             self.state.door_opened_time = None;
@@ -200,9 +216,18 @@ impl DoorMonitor {
         } else {
             // Door just opened - send SMS immediately
             let message = "Door has been opened".to_string();
-            println!("[{}] Sending door opened SMS...", timestamp);
-            if let Err(e) = send_sms(&self.client, args, &message).await {
-                eprintln!("[{}] Failed to send door opened SMS: {}", timestamp, e);
+            if !args.sms_off {
+                println!("[{}] Sending door opened SMS...", timestamp);
+                if let Err(e) = send_sms(&self.client, args, &message).await {
+                    eprintln!("[{}] Failed to send door opened SMS: {}", timestamp, e);
+                }
+            }
+
+            if !args.telegram_off {
+                println!("[{}] Sending door opened Telegra...", timestamp);
+                if let Err(e) = send_telegram(&self.client, args, &message).await {
+                    eprintln!("[{}] Failed to send door opened Telegram: {}", timestamp, e);
+                }
             }
             
             self.state.door_opened_time = Some(Instant::now());
@@ -246,10 +271,10 @@ impl DoorMonitor {
             Duration::from_secs(60 * 60),  // 60 minutes
         ];
 
-        let should_send_sms = if !self.state.sms_sent {
-            // First SMS - send immediately when threshold is reached
+        let should_send_message = if !self.state.sms_sent {
+            // First Message - send immediately when threshold is reached
             true
-        } else if let Some(last_sms) = self.state.last_sms_time {
+        } else if let Some(last_message) = self.state.last_sms_time {
             // Determine next interval based on backoff index
             let next_interval = if self.state.sms_backoff_index < sms_intervals.len() {
                 sms_intervals[self.state.sms_backoff_index]
@@ -257,12 +282,12 @@ impl DoorMonitor {
                 Duration::from_secs(60 * 60) // Every 60 minutes after the initial intervals
             };
             
-            last_sms.elapsed() >= next_interval
+            last_message.elapsed() >= next_interval
         } else {
             false
         };
         
-        if should_send_sms {
+        if should_send_message {
             println!("[{}] Preparing to send SMS (backoff index: {})...", timestamp, self.state.sms_backoff_index);
             let message = if !self.state.sms_sent {
                 format!("ALERT: Door has been open for {}", format_duration(time_open))
@@ -270,8 +295,16 @@ impl DoorMonitor {
                 format!("REMINDER: Door still open for {}", format_duration(time_open))
             };
             
-            if let Err(e) = send_sms(&self.client, args, &message).await {
-                eprintln!("[{}] Failed to send SMS: {}", timestamp, e);
+            if !args.sms_off {
+                if let Err(e) = send_sms(&self.client, args, &message).await {
+                    eprintln!("[{}] Failed to send SMS: {}", timestamp, e);
+                }
+            }
+
+            if !args.telegram_off {
+                if let Err(e) = send_telegram(&self.client, args, &message).await {
+                    eprintln!("[{}] Failed to send Telegram: {}", timestamp, e);
+                }
             }
             
             self.state.sms_sent = true;
@@ -287,11 +320,22 @@ impl DoorMonitor {
         timestamp: &str,
     ) {
         if !self.state.sms_sent {
-            println!("[{}] Preparing to send SMS...", timestamp);
+
             let message = format!("ALERT: Door has been open for {}", format_duration(time_open));
-            if let Err(e) = send_sms(&self.client, args, &message).await {
-                eprintln!("[{}] Failed to send SMS: {}", timestamp, e);
+            if !args.sms_off {
+                println!("[{}] Preparing to send SMS...", timestamp);
+                if let Err(e) = send_sms(&self.client, args, &message).await {
+                    eprintln!("[{}] Failed to send SMS: {}", timestamp, e);
+                }
             }
+
+            if !args.telegram_off {
+                println!("[{}] Preparing to send Telegram...", timestamp);
+                if let Err(e) = send_telegram(&self.client, args, &message).await {
+                    eprintln!("[{}] Failed to send Telegram: {}", timestamp, e);
+                }
+            }
+
             self.state.sms_sent = true;
         }
     }
