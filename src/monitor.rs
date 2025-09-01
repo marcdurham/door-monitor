@@ -76,7 +76,7 @@ impl DoorMonitor {
 
     pub async fn send_telegram_message(&mut self, args: Args) {
         println!("Door Monitor Sending test message via Telegram...");
-        let message = "test message (hard-coded)".to_string();
+        let message = args.test_message.clone().unwrap_or("".to_string());
         let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
         if let Err(e) = send_telegram(&self.client, &args, &message).await {
             eprintln!("[{}] Failed to send test message via Telegram: {}", timestamp, e);
