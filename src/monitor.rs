@@ -7,6 +7,7 @@ use crate::door::{DoorStatus, check_door_status};
 use crate::audio::play_beep;
 use crate::utils::format_duration;
 use crate::sms::send_sms;
+use crate::telegram::send_telegram;
 
 pub struct MonitorState {
     pub door_opened_time: Option<Instant>,
@@ -73,9 +74,18 @@ impl DoorMonitor {
         }
     }
 
+    pub async fn send_telegram_message(&mut self, args: Args) {
+        println!("Door Monitor Sending test message via Telegram...");
+        let message = "test message (hard-coded)".to_string();
+        let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
+        if let Err(e) = send_telegram(&self.client, &args, &message).await {
+            eprintln!("[{}] Failed to send test message via Telegram: {}", timestamp, e);
+        }
+    }
+
     pub async fn run(&mut self, args: Args) {
         println!("Door Monitor Starting...");
-        println!("API URL: {}", args.api_url);
+        println!("API URL: {}", args.api_url.clone().unwrap_or("".to_string()).as_str());
         println!("Check interval: {} seconds", args.check_interval_seconds);
         println!("Warning threshold: {} seconds", args.open_too_long_seconds);
 
@@ -83,7 +93,7 @@ impl DoorMonitor {
         let warning_threshold = Duration::from_secs(args.open_too_long_seconds);
         
         // Send initial status SMS when program starts
-        match check_door_status(&self.client, &args.api_url).await {
+        match check_door_status(&self.client, args.api_url.clone().unwrap_or("".to_string()).as_str()).await {
             Ok(door_status) => {
                 let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
                 let door_state_msg = if door_status.state { "closed" } else { "open" };
@@ -91,6 +101,11 @@ impl DoorMonitor {
                 println!("[{}] Sending initial status SMS...", timestamp);
                 if let Err(e) = send_sms(&self.client, &args, &message).await {
                     eprintln!("[{}] Failed to send initial status SMS: {}", timestamp, e);
+                }
+
+                println!("[{}] Sending initial status Telegram...", timestamp);
+                if let Err(e) = send_telegram(&self.client, &args, &message).await {
+                    eprintln!("[{}] Failed to send initial status Telegram: {}", timestamp, e);
                 }
                 
                 // Set initial state
@@ -110,7 +125,7 @@ impl DoorMonitor {
         }
         
         loop {
-            match check_door_status(&self.client, &args.api_url).await {
+            match check_door_status(&self.client, args.api_url.clone().unwrap_or("".to_string()).as_str()).await {
                 Ok(door_status) => {
                     self.handle_door_status(&door_status, &args, warning_threshold).await;
                 }
@@ -285,6 +300,11 @@ impl DoorMonitor {
 pub async fn run_monitor(args: Args) {
     let mut monitor = DoorMonitor::new();
     monitor.run(args).await;
+}
+
+pub async fn send_telegram_test_message(args: Args) {
+    let mut monitor = DoorMonitor::new();
+    monitor.send_telegram_message(args).await;
 }
 
 #[cfg(test)]
@@ -936,8 +956,12 @@ mod tests {
             sms_from_phone_number: None,
             sms_to_phone_number: None,
             no_sms_backoff: false,
+            telegram_token: None,
+            telegram_conversation_id: None,
+            telegram_test: false,
+            test_message: None,
         };
-        
+
         // Just verify the function signature is correct
         // We can't run it because it's an infinite loop
         let future = run_monitor(args);
