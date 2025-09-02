@@ -24,7 +24,9 @@ async fn test_door_monitor_integration() {
     ]).unwrap();
 
     let client = reqwest::Client::new();
-    let result = check_door_status(&client, &args.api_url).await;
+    let result = check_door_status(
+        &client, 
+        args.api_url.clone().unwrap_or("".to_string()).as_str()).await;
     
     mock.assert_async().await;
     assert!(result.is_ok());
@@ -63,7 +65,7 @@ fn test_args_parsing_real_world_scenarios() {
         "door-monitor",
         "--api-url", "http://192.168.1.226/rpc/Input.GetStatus?id=0"
     ]).unwrap();
-    assert_eq!(args.api_url, "http://192.168.1.226/rpc/Input.GetStatus?id=0");
+    assert_eq!(args.api_url, Some("http://192.168.1.226/rpc/Input.GetStatus?id=0".to_string()));
     
     // Full SMS setup
     let args = Args::try_parse_from(&[

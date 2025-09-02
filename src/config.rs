@@ -78,7 +78,7 @@ mod tests {
             "--api-url", "http://192.168.1.226/rpc/Input.GetStatus?id=0"
         ]).unwrap();
 
-        assert_eq!(args.api_url, Some("http://192.168.1.226/rpc/Input.GetStatus?id=0"));
+        assert_eq!(args.api_url, Some("http://192.168.1.226/rpc/Input.GetStatus?id=0".to_string()));
         assert_eq!(args.check_interval_seconds, 5); // default
         assert_eq!(args.open_too_long_seconds, 15); // default
         assert!(args.sms_backoff()); // default true
@@ -104,7 +104,7 @@ mod tests {
             "--test-message", "test message 1",
         ]).unwrap();
 
-        assert_eq!(args.api_url, Some("http://test.com"));
+        assert_eq!(args.api_url, Some("http://test.com".to_string()));
         assert_eq!(args.check_interval_seconds, 10);
         assert_eq!(args.open_too_long_seconds, 30);
         assert!(args.sms_off);
@@ -118,12 +118,6 @@ mod tests {
         assert!(args.telegram_test);
         assert_eq!(args.test_message, Some("test message 1".to_string()));
         assert!(!args.sms_backoff());
-    }
-
-    #[test]
-    fn test_args_missing_required_api_url() {
-        let result = Args::try_parse_from(&["door-monitor"]);
-        assert!(result.is_err());
     }
 
     #[test]

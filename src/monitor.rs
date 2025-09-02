@@ -91,6 +91,12 @@ impl DoorMonitor {
         println!("SMS Off: {}", args.sms_off);
         println!("Telegram Off: {}", args.telegram_off);
 
+        if args.api_url.is_none() || args.api_url.clone().unwrap().is_empty() {
+            let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
+            eprintln!("[{}] API URL is missing", timestamp);
+            std::process::exit(1);
+        }
+
         let check_interval = Duration::from_secs(args.check_interval_seconds);
         let warning_threshold = Duration::from_secs(args.open_too_long_seconds);
         
@@ -992,14 +998,16 @@ mod tests {
         // We can't actually run this to completion since it's an infinite loop,
         // but we can test that it compiles and starts
         let args = crate::config::Args {
-            api_url: "http://test.com".to_string(),
+            api_url: Some("http://test.com".to_string()),
             check_interval_seconds: 1,
             open_too_long_seconds: 5,
+            sms_off: false,
             sms_api_username: None,
             sms_api_password: None,
             sms_from_phone_number: None,
             sms_to_phone_number: None,
             no_sms_backoff: false,
+            telegram_off: false,
             telegram_token: None,
             telegram_conversation_id: None,
             telegram_test: false,
